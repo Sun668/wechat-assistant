@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from wechat_assistant.ilink_commands import run_ilink_login
+from wechat_assistant.projects.catalog import refresh_initial_catalog
 from wechat_assistant.projects.cli import settings_for
 from wechat_assistant.projects.local_engine import (
     EngineUnavailable,
@@ -71,8 +72,10 @@ def prepare(workspace):
             run_ilink_login(settings, args)
         if settings_for(workspace).owner_id == "self":
             raise ValueError("微信绑定尚未完成")
+        print("\n拉取本地项目列表……", flush=True)
+        print(refresh_initial_catalog(settings_for(workspace)), flush=True)
         print("\n环境准备完成。尚未启动收发服务。\n"
-              "首次使用还需导入客户端的本地项目列表；随后双击 start-wechat-assistant.command。",
+              "双击 start-wechat-assistant.command，再在微信发送“项目列表”自动刷新本地项目。",
               flush=True)
 
 

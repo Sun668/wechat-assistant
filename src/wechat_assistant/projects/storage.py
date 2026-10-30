@@ -220,6 +220,11 @@ class ProjectStore:
                     upload_path,
                 ),
             )
+            catalog = self.get_value("project_catalog_ids", None)
+            if catalog is not None:
+                ids = json.loads(catalog)
+                if project_id not in ids:
+                    self.set_value("project_catalog_ids", json.dumps(ids + [project_id]))
         if self.project(project_id).get("source_path"):
             self.project_dir(project_id)
 

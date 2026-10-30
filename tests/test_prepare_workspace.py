@@ -27,6 +27,7 @@ def simulated(monkeypatch, tmp_path):
 
     monkeypatch.setattr(setup.subprocess, "run", run)
     monkeypatch.setattr(setup.SharedCodexEngine, "environment", lambda _: {})
+    monkeypatch.setattr(setup, "refresh_initial_catalog", lambda _: "模拟项目已刷新")
     return settings, calls
 
 
@@ -90,3 +91,11 @@ def test_setup_lock_prevents_second_login(simulated):
         with pytest.raises(ValueError, match="已有环境准备"):
             setup.prepare(settings.workspace)
     assert calls == []
+
+
+def test_setup_refreshes_projects_once_after_binding(simulated, monkeypatch):
+    settings, _ = simulated
+    calls = []
+    monkeypatch.setattr(setup, "refresh_initial_catalog", lambda value: calls.append(value) or "已刷新")
+    setup.prepare(settings.workspace)
+    assert calls == [settings]

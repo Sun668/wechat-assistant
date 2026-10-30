@@ -4,20 +4,21 @@ import asyncio
 import json
 import logging
 import secrets
+import threading
 
 from ..adapters.ilink import ILink
 from ..models import NotSent
 from .bridge import NativeBridge
 from .delivery import OwnerDelivery
 from .local_schedules import LocalScheduleBridge
-from .router import ProjectRouter
+from .router import ProjectRouter, decode
 from .storage import ProjectStore
 
 log = logging.getLogger(__name__)
 
 
 class ProjectRuntime:
-    def __init__(self, settings, transport=None, engine=None, port=8765):
+    def __init__(self, settings, transport=None, engine=None, port=8765, project_source=None):
         self.settings = settings
         if settings.execution_backend != "codex_shared":
             raise ValueError("微信助理仅支持 codex_shared 执行入口")
@@ -27,6 +28,11 @@ class ProjectRuntime:
             raise ValueError("请先绑定 ClawBot，并将 owner_id 配置为绑定人")
         self.store = ProjectStore(settings.data_dir, settings.owner_id, settings.file_max_bytes)
         self.router, self.bridge = ProjectRouter(self.store), NativeBridge(self.store)
+        from ..adapters.codex_projects import CodexProjects
+        from .catalog import ProjectCatalog
+
+        self.catalog = ProjectCatalog(self.store, project_source or CodexProjects(settings))
+        self.ingress_lock = threading.Lock()
         self.schedules = LocalScheduleBridge(self.store, settings, callback_port=port)
         from .execution import ProjectExecution
         from .local_engine import create_engine
@@ -40,7 +46,7 @@ class ProjectRuntime:
             if not credential.is_file() or credential.is_symlink():
                 raise ValueError("请先使用 ilink-login 在当前工作区绑定 ClawBot")
             self.ilink = ILink(
-                credential, self.store, settings.owner_id, event_sink=self.router.ingest
+                credential, self.store, settings.owner_id, event_sink=self.ingest
             )
             from ..adapters.ilink_media import ILinkMedia
 
@@ -55,6 +61,29 @@ class ProjectRuntime:
             token_path.chmod(0o600)
         self.api_token = token_path.read_text().strip()
         self.running, self.tasks, self.lock_file = False, [], None
+
+    def ingest(self, raw):
+        with self.ingress_lock:
+            notice = None
+            event = str(raw.get("message_id", ""))
+            if (
+                raw.get("from_user_id") == self.store.owner_id
+                and not raw.get("group_id")
+                and event not in ("", "None")
+                and decode(raw)[0] == "项目列表"
+                and not self.store.rows("SELECT 1 FROM ingress WHERE external_id=?", (event,))
+                and not self.store.rows("SELECT 1 FROM outbox WHERE external_id=?", (event,))
+            ):
+                try:
+                    notice = self.catalog.refresh()
+                except Exception as exc:
+                    notice = "项目刷新失败，以下显示上次保存的列表。"
+                    with self.store.transaction():
+                        self.store.set_value("project_catalog_status", "failed")
+                        self.store.audit("native_project_catalog_failed", {
+                            "event": event, "error": type(exc).__name__,
+                        })
+            return self.router.ingest(raw, project_menu_notice=notice)
 
     async def start(self):
         import fcntl
@@ -169,7 +198,8 @@ class ProjectRuntime:
             "execution_environment": "local",
             "model_inference": "openai_cloud",
             "cloud_source_upload": False,
-            "project_count": len([p for p in self.store.projects() if p.get("source_path")]),
+            "project_catalog_status": self.store.get_value("project_catalog_status", "not_refreshed"),
+            "project_count": len(self.router.available_projects()),
             "jobs": counts,
             "collector": self.store.get_value("collector_status", "waiting"),
         }

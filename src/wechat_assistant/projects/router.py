@@ -73,8 +73,16 @@ class ProjectRouter:
     def __init__(self, store):
         self.store = store
 
-    def project_menu(self):
+    def available_projects(self):
         projects = [p for p in self.store.projects() if p.get("source_path")]
+        catalog = self.store.get_value("project_catalog_ids", None)
+        if catalog is not None:
+            available = set(json.loads(catalog))
+            projects = [p for p in projects if p["id"] in available]
+        return projects
+
+    def project_menu(self):
+        projects = self.available_projects()
         self.store.set_value("project_choices", json.dumps([p["id"] for p in projects]))
 
         def description(project):
@@ -91,7 +99,7 @@ class ProjectRouter:
             )
             + "\n发送“选择项目 序号”或“选择项目 完整项目名”；序号可用中文数字，空格可省略。"
             if projects
-            else "还没有 Codex 本地项目，请先从客户端刷新项目。"
+            else "当前没有已登记且可用的本地项目。请检查 Codex 登录和项目主目录后，再发送“项目列表”。"
         )
 
     def selected_project(self, value):
@@ -104,10 +112,13 @@ class ProjectRouter:
             project = self.store.project(choices[index])
         else:
             project = self.store.project(value)
+        catalog = self.store.get_value("project_catalog_ids", None)
+        if catalog is not None and project["id"] not in json.loads(catalog):
+            raise ValueError("此项目已不在最新可用列表，请重新发送“项目列表”")
         self.store.codex_project_dir(project["id"])
         return project
 
-    def ingest(self, raw):
+    def ingest(self, raw, project_menu_notice=None):
         """Only the owner-filtering iLink adapter supplies events here."""
         if raw.get("from_user_id") != self.store.owner_id or raw.get("group_id"):
             return {"status": "ignored"}
@@ -123,7 +134,7 @@ class ProjectRouter:
             # Invalid commands are durably rejected, not endlessly redelivered.
             try:
                 with self.store.transaction():
-                    project_id, result = self._route(event, raw)
+                    project_id, result = self._route(event, raw, project_menu_notice)
             except ValueError as exc:
                 project_id, result = None, {"status": "rejected", "detail": str(exc)}
                 detail = str(exc)
@@ -156,7 +167,7 @@ class ProjectRouter:
                 return {"project_id": projects.pop(), "task_id": None}
         raise ValueError("引用未能精确定位，请引用完整回复，或用“继续 T000001 修改要求”。")
 
-    def _route(self, event, raw):
+    def _route(self, event, raw, project_menu_notice=None):
         text, quote = decode(raw)
         files = [
             (i, item.get("file_item") or {})
@@ -170,6 +181,8 @@ class ProjectRouter:
         if text in ("帮助", "help", "项目列表", "选择项目", "切换项目", "当前项目", "退出项目"):
             if text in ("项目列表", "选择项目", "切换项目"):
                 body = self.project_menu()
+                if text == "项目列表" and project_menu_notice:
+                    body = project_menu_notice + "\n" + body
             elif text == "退出项目":
                 self.store.set_value("active_project", "")
                 body = self.project_menu()

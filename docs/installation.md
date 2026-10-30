@@ -9,7 +9,8 @@
 也可双击仓库根目录的 `setup-wechat-assistant.command` 自动完成下述依赖检查、安装、
 工作区初始化和微信二维码绑定。先在 `Config.toml` 设置 `workspace`（默认 `.Workspace`）；
 脚本会创建目录。已有依赖和绑定会复用，登录确认与扫码仍由你完成。
-它不启动收发服务、不执行模型，也不自动导入项目；完成后继续第 4 节。
+它不启动收发服务、不执行模型；完成登录与绑定后会拉取一次项目，`init` 命令也会拉取一次。
+无需单独的项目拉取脚本。拉取失败保留旧列表；完成后继续第 4 节。
 安装器来源为 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/)和
 [Codex CLI 官方说明](https://learn.chatgpt.com/docs/codex/cli)。
 
@@ -62,7 +63,7 @@ sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" ilink-login
 
 命令会给出本地二维码 PNG 路径。由账号所有者查看该图片、用手机微信扫码确认；如果手机要求验证码，按终端提示输入。命令确认成功后，凭据保存在工作区的 `.wechat-assistant/credentials/ilink.json`，不会从别处复制。已有绑定不会被自动替换。扫码阶段不要把二维码、验证码或凭据截图发给其他人。
 
-## 4. 启动服务，导入本地项目
+## 4. 启动服务，刷新本地项目
 
 ```sh
 sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-start
@@ -72,7 +73,17 @@ sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" status
 
 `service-start` 首次可能返回 `starting`，随后再运行 `service-status`，确认 `registered: true`；`status` 应显示 `running: true`。默认端口是本机 `127.0.0.1:8765`。若首次启动要换端口，可在 `service-start` 后加 `--port 8766`，之后的 `status`、`projects-import` 也要加相同的 `--port`。不要同时运行 `run` 与后台服务，或在同一工作区启动两个实例。
 
-项目列表必须来自已连接客户端的可信 `list_projects` 回执。在支持该工具的 Codex 客户端中，可让助手调用 `list_projects`，把返回的原始 JSON 保存为工作区内的文件，例如 `.wechat-assistant/projects.json`；不要手编项目 ID。导入器读取其中 `projects` 数组，仅处理 `projectKind` 为 `local` 的条目。每条至少要有客户端返回的 `projectId`、`label` 和第一个主目录 `path`。结构示意如下，尖括号内容**不是可用项目 ID**：
+服务启动后，绑定人在微信发送“项目列表”。每条新指令都会调用本机官方 Codex App Server
+的实验性 `project/list` 接口，读取全部分页并更新菜单；无需每次手动导出或导入文件。
+它使用本机正常 Codex 状态，不复制凭据，不调用模型，不需要 GUI 自动化。
+旧 CLI 不支持接口、未登录、连接中断或超时时，会回复“项目刷新失败”，并显示上次保存的列表。
+首次失败且没有历史项目时，列表为空；需修复登录或升级支持此协议的官方 CLI 后重发指令。
+无法访问、包含工作区运行状态或与其他项目重叠的目录不会加入本次列表；云端占位目录也不导入。
+已移除项目仅从菜单隐藏，历史会话、文件与在途工作单保留。
+
+兼容方式：仍可导入可信客户端 `list_projects` 回执。在支持该工具的 Codex 客户端中，
+让助手调用工具，把原始 JSON 保存为工作区内的 `.wechat-assistant/projects.json`；不要手编项目 ID。
+导入器读取 `projects` 数组，仅处理 `projectKind` 为 `local` 的条目。结构示意如下，尖括号内容不是可用项目 ID：
 
 ```json
 {
@@ -92,7 +103,8 @@ sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" projects-import "
 sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" status
 ```
 
-第二次 `status` 的 `project_count` 应大于 0。服务停止时才可使用 `projects-import ... --offline`。目前仓库没有面向普通安装者的项目列表导出命令；如果使用环境无法提供客户端 `list_projects` 回执，这一步无法独立完成，不能用自造 UUID 代替。
+刷新或导入后，`status` 的 `project_count` 应大于 0。服务停止时才可使用 `projects-import ... --offline`。
+`project_catalog_status` 表示最近一次自动刷新状态；失败不会清空之前的菜单。
 
 ## 5. 使用、停止与查看问题
 

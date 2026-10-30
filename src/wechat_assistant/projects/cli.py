@@ -121,8 +121,11 @@ def main():
             print(json.dumps(verify_local(settings), ensure_ascii=False, indent=2))
             return
         if args.command == "init":
+            from .catalog import refresh_initial_catalog
+
             directory(settings.data_dir / "clawbot-projects")
             print(f"ClawBot 项目工作区：{settings.workspace}\n不启用微信监听或本地模型。")
+            print(refresh_initial_catalog(settings))
             return
         if args.command in ("doctor", "engine-status"):
             from .local_engine import create_engine
