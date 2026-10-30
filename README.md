@@ -98,6 +98,11 @@ ClawBot 内项目已可重命名；客户端项目名称和挂载文件夹仍需
 
 ## 启动
 
+本机已有工作区和微信绑定时，可双击仓库根目录的 `start-wechat-assistant.command`。
+默认使用 `~/Documents/wechat-assistant-workspace`，检查执行入口后启动后台服务并显示状态；
+不会自动扫码或导入项目。也可在终端运行 `sh start-wechat-assistant.command "/你的工作区"`。
+首次配置仍按下方步骤完成。
+
 需要 uv、Python 3.11–3.13 和官方 Codex 二进制（支持自动寻找 ChatGPT.app 内置版本）。
 工作区必填；已有 ClawBot 绑定继续使用。`codex_shared` 使用本机既有 Codex 登录与状态目录，
 不复制认证文件。编辑工作区 `.wechat-assistant/clawbot-projects/engine.toml`，设置
