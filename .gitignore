@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+data/
+.wechat-assistant/
+config.local.toml
+.env
+build/
+
+# Owner files and local runtime backups are not source code.
+*.doc
+*.docx
+*.pdf
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.sqlite
+*.db
+*.log
+.migration-archive/
