@@ -98,8 +98,16 @@ ClawBot 内项目已可重命名；客户端项目名称和挂载文件夹仍需
 
 ## 启动
 
+首次准备可双击 `setup-wechat-assistant.command`：读取 `Config.toml`，检查并安装 uv、
+Python 3.11–3.13 和锁定的项目依赖，初始化工作区，检查官方 Codex CLI 及 ChatGPT 登录。
+缺少 Codex 时使用官方安装器，未登录时等待你完成登录；尚未绑定微信时生成并打开本地二维码，
+等待你扫码及输入手机要求的验证码。已有微信绑定会跳过，不自动替换。
+准备脚本不启动收发服务，也不自动导入客户端项目列表。可重复运行以补齐未完成的步骤。
+uv、Python 和 Codex 工具按官方方式安装到本机；项目依赖、缓存和微信凭据保存在所选工作区。
+
 本机已有工作区和微信绑定时，可双击仓库根目录的 `start-wechat-assistant.command`。
-默认使用 `~/Documents/wechat-assistant-workspace`，检查执行入口后启动后台服务并显示状态；
+从仓库根目录的 `Config.toml` 读取 `workspace`，默认值为 `.Workspace`（已加入 Git 忽略规则）。
+相对路径以配置文件所在目录为基准，也支持绝对路径和 `~/`；启动时检查执行入口并显示服务状态。
 不会自动扫码或导入项目。也可在终端运行 `sh start-wechat-assistant.command "/你的工作区"`。
 首次配置仍按下方步骤完成。
 
@@ -110,13 +118,14 @@ ClawBot 内项目已可重命名；客户端项目名称和挂载文件夹仍需
 
 ```sh
 cd /path/to/wechat-assistant
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" init
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" doctor
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" engine-status
+mkdir -p .Workspace
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" init
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" doctor
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" engine-status
 # 仅尚未绑定时执行，由你扫码：
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" ilink-login
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-start
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" ilink-login
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-start
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-status
 ```
 
 `service-start` 从已有目录访问权限的客户端/终端启动独立后台守护进程，离开临时终端后继续运行，运行进程异常退出会重新启动。

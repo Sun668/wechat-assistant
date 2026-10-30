@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 data/
 .wechat-assistant/
+/.Workspace/
 config.local.toml
 .env
 build/

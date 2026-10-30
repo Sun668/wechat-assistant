@@ -6,6 +6,13 @@
 
 ## 1. 准备软件和账号
 
+也可双击仓库根目录的 `setup-wechat-assistant.command` 自动完成下述依赖检查、安装、
+工作区初始化和微信二维码绑定。先在 `Config.toml` 设置 `workspace`（默认 `.Workspace`）；
+脚本会创建目录。已有依赖和绑定会复用，登录确认与扫码仍由你完成。
+它不启动收发服务、不执行模型，也不自动导入项目；完成后继续第 4 节。
+安装器来源为 [uv 官方说明](https://docs.astral.sh/uv/getting-started/installation/)和
+[Codex CLI 官方说明](https://learn.chatgpt.com/docs/codex/cli)。
+
 - 一台可联网的 Mac，Python 3.11–3.13，`uv`，以及能用 `codex` 命令调用的官方 Codex CLI。建议使用 ChatGPT 登录，不要把 API key 或 `~/.codex` 中的认证文件复制进项目或工作区。
 - 已在 ChatGPT/Codex 客户端创建至少一个**本地项目**，并确认其第一个（主）本地目录存在、可读写。云端项目不能作为这里的执行目标。
 - 能在手机微信中完成 ClawBot 扫码绑定。首次绑定和真实消息验收必须由账号所有者亲自操作。
@@ -23,18 +30,18 @@ codex login status
 
 ## 2. 取得代码，建立独立工作区
 
-从 GitHub 取得代码后，在终端进入仓库。以下工作区路径只是示例，请换成自己 Mac 上的实际路径：
+从 GitHub 取得代码后，在终端进入仓库。默认工作区为仓库根目录下的 `.Workspace`，已加入 Git 忽略规则。以下路径请换成自己 Mac 上的实际仓库路径：
 
 ```sh
 git clone https://github.com/Sun668/wechat-assistant.git
 cd wechat-assistant
-mkdir -p "/path/to/wechat-assistant-workspace"
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" init
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" doctor
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" engine-status
+mkdir -p "/path/to/wechat-assistant/.Workspace"
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" init
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" doctor
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" engine-status
 ```
 
-第一次运行会由 `uv` 按 `uv.lock` 安装 Python 依赖，需要能访问包下载源。脚本把虚拟环境、下载缓存和临时文件放在该工作区的 `.wechat-assistant` 下。工作区必须事先存在，且应与所有项目主目录分开；项目目录不能包含工作区状态目录，两个项目的本地目录也不能重叠。不要把工作区或收到的个人文件上传到代码仓库。
+第一次运行会由 `uv` 按 `uv.lock` 安装 Python 依赖，需要能访问包下载源。脚本把虚拟环境、下载缓存和临时文件放在该工作区的 `.wechat-assistant` 下。工作区必须事先存在，除作为启动入口的本仓库外，应与执行目标的项目主目录分开；项目目录不能包含工作区状态目录，两个项目的本地目录也不能重叠。不要把工作区或收到的个人文件上传到代码仓库。
 
 `doctor` 和 `engine-status` 应显示 `execution_backend: codex_shared`、`local_engine: ready`；绑定前的 `clawbot_bound: false` 属于正常状态。如果是 `binary_missing`，检查 `codex` 是否在服务进程可见的 `PATH` 中；必要时可在工作区的 `.wechat-assistant/clawbot-projects/engine.toml` 设置官方 CLI 的绝对路径：
 
@@ -50,7 +57,7 @@ codex_binary = "/absolute/path/to/codex"
 仅在当前工作区**尚未绑定**时执行：
 
 ```sh
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" ilink-login
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" ilink-login
 ```
 
 命令会给出本地二维码 PNG 路径。由账号所有者查看该图片、用手机微信扫码确认；如果手机要求验证码，按终端提示输入。命令确认成功后，凭据保存在工作区的 `.wechat-assistant/credentials/ilink.json`，不会从别处复制。已有绑定不会被自动替换。扫码阶段不要把二维码、验证码或凭据截图发给其他人。
@@ -58,9 +65,9 @@ sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" ilink-login
 ## 4. 启动服务，导入本地项目
 
 ```sh
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-start
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-status
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-start
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" status
 ```
 
 `service-start` 首次可能返回 `starting`，随后再运行 `service-status`，确认 `registered: true`；`status` 应显示 `running: true`。默认端口是本机 `127.0.0.1:8765`。若首次启动要换端口，可在 `service-start` 后加 `--port 8766`，之后的 `status`、`projects-import` 也要加相同的 `--port`。不要同时运行 `run` 与后台服务，或在同一工作区启动两个实例。
@@ -81,8 +88,8 @@ sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" status
 ```
 
 ```sh
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" projects-import "/path/to/wechat-assistant-workspace/.wechat-assistant/projects.json"
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" projects-import "/path/to/wechat-assistant/.Workspace/.wechat-assistant/projects.json"
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" status
 ```
 
 第二次 `status` 的 `project_count` 应大于 0。服务停止时才可使用 `projects-import ... --offline`。目前仓库没有面向普通安装者的项目列表导出命令；如果使用环境无法提供客户端 `list_projects` 回执，这一步无法独立完成，不能用自造 UUID 代替。
@@ -92,9 +99,9 @@ sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" status
 账号所有者在已绑定的 ClawBot 私聊中发送“项目列表”，再发送“选择项目 1”。随后可发普通问题或文件；文件落在所选项目的主本地目录，普通请求由同一目录中的官方 Codex CLI 执行，可能读取、修改文件并运行命令。只应绑定可信的所有者。服务只回复绑定人，不处理微信联系人消息，也不会替联系人自动回复。`项目目录`、`文件列表`、`新对话` 等指令见 [README](../README.md)。
 
 ```sh
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-status
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" status
-sh scripts/workspace.sh "/path/to/wechat-assistant-workspace" service-stop
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" status
+sh scripts/workspace.sh "/path/to/wechat-assistant/.Workspace" service-stop
 ```
 
 默认后台服务的日志在工作区 `.wechat-assistant/clawbot-projects/service/background.log`；网关数据库在 `.wechat-assistant/clawbot-projects/gateway.sqlite`。系统重启后要重新运行 `service-start`；Mac 睡眠时不会处理消息。可选的 `service-start --launchd` 需要该系统服务另行具有项目目录的访问权限，不建议作为首次部署方式。定时任务依赖 macOS `launchd` 和本机时区，时区应设为北京时间；完整的真实“到期执行并微信回传”流程尚未验收。
