@@ -74,6 +74,26 @@ def test_must_select_before_chat_or_files(gateway):
     assert store.get_value("active_project") in {P, Q}
 
 
+@pytest.mark.parametrize("command", ["/help", "帮助", "help"])
+@pytest.mark.parametrize("selected", [False, True])
+def test_help_returns_commands_without_model_work_or_changing_selection(gateway, command, selected):
+    store, router, _ = gateway
+    if selected:
+        select(router)
+    active = store.get_value("active_project")
+    raw = event(command)
+    assert router.ingest(raw)["status"] == "command"
+    replies = store.rows("SELECT body FROM outbox WHERE source_event=?", (raw["message_id"],))
+    assert len(replies) == 1
+    for entry in ("/help", "退出项目", "重试文件", "/upload-path reset", "继续 T000001"):
+        assert entry in replies[0]["body"]
+    assert store.get_value("active_project") == active
+    assert not store.rows("SELECT * FROM jobs")
+    assert not store.rows("SELECT * FROM tasks")
+    assert router.ingest(raw)["status"] == "duplicate"
+    assert len(store.rows("SELECT 1 FROM outbox WHERE source_event=?", (raw["message_id"],))) == 1
+
+
 @pytest.mark.parametrize(
     ("command", "menu_index"),
     [

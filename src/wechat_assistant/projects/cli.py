@@ -9,10 +9,13 @@ from pathlib import Path
 import httpx
 
 from ..config import Settings
+from .project_paths import is_excluded_project_path
 from .storage import ProjectStore, directory
 
 
-def settings_for(workspace):
+def settings_for(workspace, config_path=None):
+    from .upload_config import default_config_path
+
     workspace = Path(workspace).expanduser().resolve(strict=True)
     if not workspace.is_dir():
         raise ValueError("工作区必须是目录")
@@ -29,11 +32,11 @@ def settings_for(workspace):
             raise ValueError("ClawBot 凭证不能是符号链接")
         owner = json.loads(credential.read_text())["ilink_user_id"]
     options = {}
-    config_path = data / "clawbot-projects" / "engine.toml"
-    if config_path.exists():
-        if config_path.is_symlink():
+    engine_path = data / "clawbot-projects" / "engine.toml"
+    if engine_path.exists():
+        if engine_path.is_symlink():
             raise ValueError("执行配置不能是符号链接")
-        options = tomllib.loads(config_path.read_text())
+        options = tomllib.loads(engine_path.read_text())
         if set(options) - {
             "execution_backend",
             "codex_binary",
@@ -44,6 +47,7 @@ def settings_for(workspace):
         workspace=workspace,
         data_dir=data,
         owner_id=owner,
+        launcher_config=Path(config_path).expanduser().absolute() if config_path else default_config_path(),
         **options,
     )
 
@@ -51,6 +55,7 @@ def settings_for(workspace):
 def main():
     parser = argparse.ArgumentParser(description="ClawBot 项目入口：先选项目，再对话和传文件")
     parser.add_argument("--workspace", required=True)
+    parser.add_argument("--config", help="启动配置 Config.toml 的路径")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init")
     commands.add_parser("doctor")
@@ -86,7 +91,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     try:
-        settings = settings_for(args.workspace)
+        settings = settings_for(args.workspace, args.config)
         if args.command == "schedule-fire":
             from .local_schedules import LocalScheduleBridge
 
@@ -174,7 +179,10 @@ def main():
         if args.command == "projects-import":
             payload = json.loads(Path(args.file).read_text())
             projects = payload.get("projects", []) if isinstance(payload, dict) else payload
-            projects = [p for p in projects if p.get("projectKind") == "local"]
+            projects = [
+                p for p in projects if p.get("projectKind") == "local"
+                and not is_excluded_project_path(p.get("path"))
+            ]
             if args.offline:
                 import fcntl
 

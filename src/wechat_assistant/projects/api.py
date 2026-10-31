@@ -74,7 +74,7 @@ def create_app(runtime, background=True):
 
     @app.get("/projects", dependencies=[Depends(operator)])
     def projects():
-        return [p for p in runtime.store.projects() if p.get("source_path")]
+        return runtime.router.available_projects()
 
     @app.post("/projects", dependencies=[Depends(operator)])
     def register(request: Registration):

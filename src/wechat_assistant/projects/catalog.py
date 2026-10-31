@@ -4,6 +4,8 @@ import json
 import uuid
 from pathlib import Path
 
+from .project_paths import is_excluded_project_path
+
 
 class ProjectCatalog:
     def __init__(self, store, source):
@@ -31,8 +33,7 @@ class ProjectCatalog:
                 path = roots[0].get("path")
                 if not isinstance(path, str) or not Path(path).is_absolute():
                     raise ValueError("项目主目录无效")
-                # Legacy cloud placeholders are not native local execution targets.
-                if ".chatgpt-projects" in Path(path).parts:
+                if is_excluded_project_path(path):
                     continue
                 records.append((record, path))
         with self.store.transaction():

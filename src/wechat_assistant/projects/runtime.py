@@ -26,7 +26,13 @@ class ProjectRuntime:
             raise ValueError("所有运行数据必须归属于指定工作区的 .wechat-assistant")
         if not settings.owner_id or settings.owner_id == "self":
             raise ValueError("请先绑定 ClawBot，并将 owner_id 配置为绑定人")
-        self.store = ProjectStore(settings.data_dir, settings.owner_id, settings.file_max_bytes)
+        from .upload_config import UploadConfig, default_config_path
+
+        upload_config = UploadConfig(settings.launcher_config or default_config_path(), settings.data_dir)
+        upload_config.get()  # Fail clearly on malformed configuration before receiving files.
+        self.store = ProjectStore(
+            settings.data_dir, settings.owner_id, settings.file_max_bytes, upload_config=upload_config
+        )
         self.router, self.bridge = ProjectRouter(self.store), NativeBridge(self.store)
         from ..adapters.codex_projects import CodexProjects
         from .catalog import ProjectCatalog
@@ -160,7 +166,10 @@ class ProjectRuntime:
             self.delivery.flush()
             content = self.ilink.media.download(json.loads(file["media"]))
             self.store.save_file(file, content)
-            body = f"【{self.store.project(file['project_id'])['name']}】《{file['name']}》已保存到项目目录。\n{self.store.file_path(file)}"
+            body = (
+                f"【{self.store.project(file['project_id'])['name']}】《{file['name']}》"
+                f"已保存到{self.store.file_location_label(file)}。\n{self.store.file_path(file)}"
+            )
         except Exception:
             with self.store.transaction() as db:
                 db.execute("UPDATE files SET state='failed' WHERE id=?", (file["id"],))

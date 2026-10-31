@@ -34,6 +34,7 @@ class MacService:
                 "-B",
                 "-m",
                 "wechat_assistant.projects.cli",
+                *self.config_args(),
                 "--workspace",
                 str(self.settings.workspace),
                 "run",
@@ -56,6 +57,9 @@ class MacService:
             "StandardOutPath": str(self.root / "stdout.log"),
             "StandardErrorPath": str(self.root / "stderr.log"),
         }
+
+    def config_args(self):
+        return ["--config", str(self.settings.launcher_config)] if self.settings.launcher_config else []
 
     def _launchctl(self, *args):
         if sys.platform != "darwin":
@@ -187,6 +191,7 @@ class AppBackgroundService(MacService):
             "-B",
             "-m",
             "wechat_assistant.projects.service",
+            *self.config_args(),
             "--port",
             str(port),
             "--workspace",
@@ -241,6 +246,7 @@ class AppBackgroundService(MacService):
                         "-B",
                         "-m",
                         "wechat_assistant.projects.cli",
+                        *self.config_args(),
                         "--workspace",
                         str(self.settings.workspace),
                         "run",
@@ -276,7 +282,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
+    parser.add_argument("--config")
     parser.add_argument("--port", required=True, type=int)
     args = parser.parse_args()
     os.umask(0o077)
-    AppBackgroundService(settings_for(args.workspace)).supervise(args.port)
+    AppBackgroundService(settings_for(args.workspace, args.config)).supervise(args.port)

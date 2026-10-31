@@ -5,13 +5,28 @@ import re
 import secrets
 
 from ..workspace_io import utc_now as now
+from .project_paths import is_excluded_project_path
 
 HELP = (
-    "项目列表\n选择项目 项目名或列表序号（支持中文数字）\n当前项目\n切换项目 项目名\n"
-    "项目目录\n文件列表\n发送文件《完整文件名》\n任务列表\n新对话\n"
-    "继续 T000001 修改要求\n引用结果可继续同一任务。\n"
-    "可以直接说“帮我每天早上九点检查这个项目并汇报”；定时结果会回到本聊天。\n"
-    "消息和文件归属在接收时固定；本地执行入口未就绪时会保留排队。"
+    "先发“项目列表”，再发“选择项目 1”，之后直接提问或发文件。\n"
+    "\n项目\n"
+    "项目列表：刷新列表\n"
+    "选择项目 1 / 切换项目 名称\n"
+    "当前项目 / 项目目录 / 退出项目\n"
+    "[项目名] 请求内容：指定项目\n"
+    "\n文件\n"
+    "文件列表：查看已收文件\n"
+    "发送文件《文件名》：取回文件\n"
+    "重试文件《文件名》：重试下载\n"
+    "\n任务与会话\n"
+    "任务列表：查看状态\n"
+    "新对话：另开会话\n"
+    "继续 T000001 要求：续问\n"
+    "\n收件目录\n"
+    "/upload-path：查看\n"
+    "/upload-path 绝对路径：设置\n"
+    "/upload-path reset：恢复项目目录\n"
+    "\n/help：查看帮助"
 )
 
 CHINESE_DIGITS = {
@@ -74,7 +89,10 @@ class ProjectRouter:
         self.store = store
 
     def available_projects(self):
-        projects = [p for p in self.store.projects() if p.get("source_path")]
+        projects = [
+            p for p in self.store.projects()
+            if p.get("source_path") and not is_excluded_project_path(p["source_path"])
+        ]
         catalog = self.store.get_value("project_catalog_ids", None)
         if catalog is not None:
             available = set(json.loads(catalog))
@@ -178,7 +196,23 @@ class ProjectRouter:
         project = None
         task_id = None
         handled = False
-        if text in ("帮助", "help", "项目列表", "选择项目", "切换项目", "当前项目", "退出项目"):
+        if re.match(r"^/upload-path(?:\s|$)", text):
+            if files or quote:
+                raise ValueError("请单独发送 /upload-path 指令，不要附带文件或引用")
+            value = text[len("/upload-path"):].strip()
+            if value:
+                value = "" if value in ('reset', '""', "''") else value
+                value = self.store.set_upload_path(value)
+                self.store.audit("upload_path_changed", {"event": event, "path": value})
+            else:
+                value = self.store.upload_path()
+            body = (
+                "默认上传目录：\n" + value if value else
+                "默认上传目录为空：沿用所选项目的第一个本地目录。"
+            )
+            self.store.enqueue("command:" + event, body + "\n仅影响后续新收件，在途和已收文件不迁移。", event)
+            return None, {"status": "command"}
+        if text in ("/help", "帮助", "help", "项目列表", "选择项目", "切换项目", "当前项目", "退出项目"):
             if text in ("项目列表", "选择项目", "切换项目"):
                 body = self.project_menu()
                 if text == "项目列表" and project_menu_notice:
@@ -252,12 +286,15 @@ class ProjectRouter:
             handled = True
         if text == "文件列表":
             rows = self.store.rows(
-                "SELECT name,state FROM files WHERE project_id=? ORDER BY created_at",
+                "SELECT name,state,project_id,storage_root FROM files WHERE project_id=? ORDER BY created_at",
                 (pid,),
             )
             body = "\n".join(
                 f"《{r['name']}》 · "
-                + ("已保存到项目目录" if r["state"] == "ready" else r["state"])
+                + (
+                    "已保存到" + self.store.file_location_label(r)
+                    if r["state"] == "ready" else r["state"]
+                )
                 for r in rows
             )
             self.store.enqueue(
@@ -326,7 +363,9 @@ class ProjectRouter:
             )
             root = self.store.receive_directory(pid)
             fid = "f-" + secrets.token_hex(16)
-            name = self.store.available_name(pid, item.get("file_name") or "attachment.bin")
+            name = self.store.available_name(
+                pid, item.get("file_name") or "attachment.bin", storage_root=root
+            )
             self.store.db.execute(
                 """INSERT INTO files
               (id,project_id,source_key,name,state,media,created_at,relative_path,storage_root) VALUES(?,?,?,?,'pending',?,?,?,?)""",

@@ -12,6 +12,7 @@ class Settings(BaseModel):
     workspace: Path
     data_dir: Path
     owner_id: str = "self"
+    launcher_config: Path | None = None
     file_max_bytes: int = Field(default=50 * 1024 * 1024, ge=1, le=100 * 1024 * 1024)
     execution_backend: Literal["codex_shared"] = "codex_shared"
     codex_binary: str = "codex"

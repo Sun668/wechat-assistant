@@ -16,4 +16,4 @@ export UV_CACHE_DIR="$STATE_DIR/cache/uv"
 export UV_PROJECT_ENVIRONMENT="$STATE_DIR/venv"
 export TMPDIR="$STATE_DIR/tmp"
 exec uv run --project "$PROJECT_DIR" --locked \
-    clawbot-projects --workspace "$WORKSPACE_DIR" "$@"
+    clawbot-projects --config "$PROJECT_DIR/Config.toml" --workspace "$WORKSPACE_DIR" "$@"

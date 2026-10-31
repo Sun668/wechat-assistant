@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..workspace_io import read_regular, safe_name
 from ..workspace_io import utc_now as now
+from .project_paths import is_excluded_project_path
 
 
 def directory(path: Path):
@@ -21,9 +22,10 @@ def directory(path: Path):
 
 
 class ProjectStore:
-    def __init__(self, data_dir: Path, owner_id: str, max_bytes: int):
+    def __init__(self, data_dir: Path, owner_id: str, max_bytes: int, upload_config=None):
         self.root = directory(data_dir / "clawbot-projects")
         self.owner_id, self.max_bytes = owner_id, max_bytes
+        self.upload_config = upload_config
         self.lock = threading.RLock()
         path = self.root / "gateway.sqlite"
         if path.is_symlink():
@@ -183,6 +185,8 @@ class ProjectStore:
             if not source_path:
                 raise ValueError("本地项目必须提供客户端登记的资料目录")
         if source_path is not None:
+            if is_excluded_project_path(source_path):
+                raise ValueError("项目主目录属于已排除的 ChatGPT 目录，请选择其他本地项目")
             path = Path(source_path).expanduser().resolve(strict=True)
             if not path.is_dir():
                 raise ValueError("本地项目资料目录不存在")
@@ -269,7 +273,23 @@ class ProjectStore:
         return self.codex_project_dir(project_id)
 
     def receive_directory(self, project_id):
-        return self.codex_project_dir(project_id)
+        primary = self.codex_project_dir(project_id)
+        return (self.upload_config.receive_directory() or primary) if self.upload_config else primary
+
+    def upload_path(self):
+        return self.upload_config.get() if self.upload_config else ""
+
+    def set_upload_path(self, value):
+        if self.upload_config is None:
+            raise ValueError("上传路径配置入口未启用")
+        return self.upload_config.set(value)
+
+    def file_location_label(self, row):
+        project = self.project(row["project_id"])
+        return (
+            "接收目录" if row.get("storage_root")
+            and row["storage_root"] != project.get("source_path") else "项目目录"
+        )
 
     def codex_project_dir(self, project_id):
         """Use the client's first (primary) folder for local Codex work."""
@@ -283,6 +303,8 @@ class ProjectStore:
         source = project.get("source_path")
         if not source:
             raise ValueError("项目缺少客户端登记的第一个本地目录")
+        if is_excluded_project_path(source):
+            raise ValueError("项目主目录属于已排除的 ChatGPT 目录，请选择其他本地项目")
         path = Path(source)
         if not path.is_absolute() or not path.is_dir():
             raise ValueError("Codex 项目主目录暂不可用")
@@ -291,14 +313,17 @@ class ProjectStore:
         self.validate_project_root(project_id, path)
         return directory(path)
 
-    def available_name(self, project_id, value, exclude_id=None):
+    def available_name(self, project_id, value, exclude_id=None, storage_root=None):
         name = safe_name(value)
+        folder = storage_root if storage_root is not None else self.receive_directory(project_id)
         existing = {
             row["name"].casefold()
-            for row in self.rows("SELECT id,name FROM files WHERE project_id=?", (project_id,))
+            for row in self.rows(
+                "SELECT id,name FROM files WHERE project_id=? OR storage_root=?",
+                (project_id, str(folder)),
+            )
             if row["id"] != exclude_id
         }
-        folder = self.receive_directory(project_id)
         candidate = name
         stem, suffix = Path(name).stem, Path(name).suffix
         while len(stem.encode()) > 180:
@@ -365,7 +390,8 @@ class ProjectStore:
             )
             self.enqueue(
                 "download:" + row["id"],
-                f"【{self.project(row['project_id'])['name']}】《{row['name']}》已保存到项目目录。\n{path}",
+                f"【{self.project(row['project_id'])['name']}】《{row['name']}》"
+                f"已保存到{self.file_location_label(row)}。\n{path}",
                 row["source_key"].rsplit(":", 1)[0],
                 row["project_id"],
             )
