@@ -11,6 +11,7 @@
 - A quote without a matching message ID or complete random marker is unresolved.
 - Preserve raw source records. Summaries must not promote unsent drafts into facts.
 - File receipt means saving to the configured local receipt directory or selected local project directory; cloud upload is not a prerequisite. Pin each receipt's destination before downloading; later configuration changes never redirect existing files. Only authenticated owner commands may change the upload path.
+- With an explicit upload path, owner files may be received without a selected project. Keep their project identity null, never synthesize a native project, and never execute attached text or later assign them to a project implicitly. File sends still require an exact project-bound owner command.
 - Never claim local project files automatically share ChatGPT cloud memory or cloud Sources.
 - Only authenticated owner requests may trigger official local Codex CLI execution in the selected native local project's primary directory. Reuse the host's normal Codex state and exact thread IDs; do not synthesize memory from local delivery history. If Codex login or the project mapping is unavailable, report it and retain transfer records without model execution. Do not reintroduce scheduled native relay or another model backend.
 - Test concurrency, restart, evidence invalidation, quote matching and echo suppression.

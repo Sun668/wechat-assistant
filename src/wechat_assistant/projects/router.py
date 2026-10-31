@@ -9,6 +9,7 @@ from .project_paths import is_excluded_project_path
 
 HELP = (
     "先发“项目列表”，再发“选择项目 1”，之后直接提问或发文件。\n"
+    "设置收件目录后，也可不选项目直接发文件。\n"
     "\n项目\n"
     "项目列表：刷新列表\n"
     "选择项目 1 / 切换项目 名称\n"
@@ -182,6 +183,8 @@ class ProjectRouter:
             )
             projects = {f["project_id"] for f in files}
             if len(projects) == 1:
+                if None in projects:
+                    raise ValueError("引用的文件尚未归属项目；请先选择项目再发送处理请求")
                 return {"project_id": projects.pop(), "task_id": None}
         raise ValueError("引用未能精确定位，请引用完整回复，或用“继续 T000001 修改要求”。")
 
@@ -270,6 +273,23 @@ class ProjectRouter:
             task_id = target["task_id"]
         if not files and handled:
             return project["id"] if project else None, {"status": "command"}
+        if project is None and not self.store.get_value("active_project"):
+            if files:
+                self._receive_files(event, files, None, "【收件箱】")
+                if text and not handled:
+                    self.store.enqueue(
+                        "unassigned-text:" + event,
+                        "文件已登记到收件箱；附带文字未提交给 Codex。请先选择项目再单独发送处理请求。",
+                        event,
+                    )
+                return None, {"status": "accepted", "project_id": None}
+            if text == "文件列表":
+                self._list_files(event, None, "【收件箱】")
+                return None, {"status": "command"}
+            retry = re.fullmatch(r"重试文件\s*《(.+)》", text)
+            if retry:
+                self._retry_file(event, None, "【收件箱】", retry[1])
+                return None, {"status": "command"}
         project = project or self.store.project()
         pid = project["id"]
         self.store.codex_project_dir(pid)
@@ -285,24 +305,7 @@ class ProjectRouter:
             )
             handled = True
         if text == "文件列表":
-            rows = self.store.rows(
-                "SELECT name,state,project_id,storage_root FROM files WHERE project_id=? ORDER BY created_at",
-                (pid,),
-            )
-            body = "\n".join(
-                f"《{r['name']}》 · "
-                + (
-                    "已保存到" + self.store.file_location_label(r)
-                    if r["state"] == "ready" else r["state"]
-                )
-                for r in rows
-            )
-            self.store.enqueue(
-                "command:" + event,
-                prefix + "\n" + (body or "项目尚无 ClawBot 文件记录"),
-                event,
-                pid,
-            )
+            self._list_files(event, pid, prefix)
             handled = True
         if text == "项目目录":
             self.store.enqueue(
@@ -311,19 +314,7 @@ class ProjectRouter:
             handled = True
         retry = re.fullmatch(r"重试文件\s*《(.+)》", text)
         if retry:
-            matches = self.store.rows(
-                "SELECT * FROM files WHERE project_id=? AND name=?", (pid, retry[1])
-            )
-            if len(matches) != 1 or matches[0]["state"] != "failed":
-                raise ValueError("没有唯一的下载失败文件")
-            self.store.db.execute(
-                "UPDATE files SET state='pending' WHERE id=?", (matches[0]["id"],)
-            )
-            self.store.db.execute(
-                "UPDATE outbox SET dedupe_key=dedupe_key || ? WHERE dedupe_key=?",
-                (":" + event, "download:" + matches[0]["id"]),
-            )
-            self.store.enqueue("retry:" + event, prefix + " 文件已排队重新下载。", event, pid)
+            self._retry_file(event, pid, prefix, retry[1])
             handled = True
         elif text == "任务列表":
             rows = self.store.rows(
@@ -357,37 +348,8 @@ class ProjectRouter:
             payload = json.dumps({"id": file["id"], "sha256": file["sha256"]})
             self.store.enqueue("file-send:" + event, payload, event, pid, kind="file")
             handled = True
-        for index, item in files:
-            ahead = self.store.rows(
-                "SELECT id,state FROM jobs WHERE state!='completed' ORDER BY seq LIMIT 1"
-            )
-            root = self.store.receive_directory(pid)
-            fid = "f-" + secrets.token_hex(16)
-            name = self.store.available_name(
-                pid, item.get("file_name") or "attachment.bin", storage_root=root
-            )
-            self.store.db.execute(
-                """INSERT INTO files
-              (id,project_id,source_key,name,state,media,created_at,relative_path,storage_root) VALUES(?,?,?,?,'pending',?,?,?,?)""",
-                (fid, pid, f"{event}:{index}", name, json.dumps(item), now(), name, str(root)),
-            )
-            job_id = self.store.new_job(pid, event, "file_receive", file_id=fid)
-            receipt = (
-                f"已收到《{name}》，正在排队；前一项 {ahead[0]['id']} 完成后保存。"
-                if ahead and ahead[0]["state"] in ("queued", "claimed")
-                else (
-                    f"已收到《{name}》；队列因 {ahead[0]['id']} 待核对而暂停，文件已保留。"
-                    if ahead
-                    else f"已收到《{name}》。"
-                )
-            )
-            self.store.enqueue(
-                "file-received:" + fid,
-                prefix + " " + receipt,
-                event,
-                pid,
-                job_id=job_id,
-            )
+        if files:
+            self._receive_files(event, files, pid, prefix)
         if text and not handled:
             if len(text) > 20000:
                 raise ValueError("单条问题过长，请改为文件发送")
@@ -433,3 +395,59 @@ class ProjectRouter:
             result.update(task_id=task_id, job_id=job_id)
         result["project_id"] = pid
         return pid, result
+
+    def _list_files(self, event, pid, prefix):
+        rows = self.store.rows(
+            "SELECT name,state,project_id,storage_root FROM files WHERE project_id IS ? ORDER BY created_at",
+            (pid,),
+        )
+        body = "\n".join(
+            f"《{r['name']}》 · " + (
+                "已保存到" + self.store.file_location_label(r) if r["state"] == "ready" else r["state"]
+            ) for r in rows
+        )
+        self.store.enqueue("command:" + event, prefix + "\n" + (body or "尚无收件记录"), event, pid)
+
+    def _retry_file(self, event, pid, prefix, name):
+        matches = self.store.rows("SELECT * FROM files WHERE project_id IS ? AND name=?", (pid, name))
+        if len(matches) != 1 or matches[0]["state"] != "failed":
+            raise ValueError("没有唯一的下载失败文件")
+        self.store.db.execute("UPDATE files SET state='pending' WHERE id=?", (matches[0]["id"],))
+        self.store.db.execute(
+            "UPDATE outbox SET dedupe_key=dedupe_key || ? WHERE dedupe_key=?",
+            (":" + event, "download:" + matches[0]["id"]),
+        )
+        self.store.enqueue("retry:" + event, prefix + " 文件已排队重新下载。", event, pid)
+
+    def _receive_files(self, event, files, pid, prefix):
+        root = self.store.receive_directory(pid)
+        for index, item in files:
+            ahead = self.store.rows(
+                "SELECT id,state FROM jobs WHERE state!='completed' ORDER BY seq LIMIT 1"
+            )
+            fid = "f-" + secrets.token_hex(16)
+            name = self.store.available_name(
+                pid, item.get("file_name") or "attachment.bin", storage_root=root
+            )
+            self.store.db.execute(
+                """INSERT INTO files
+              (id,project_id,source_key,name,state,media,created_at,relative_path,storage_root) VALUES(?,?,?,?,'pending',?,?,?,?)""",
+                (fid, pid, f"{event}:{index}", name, json.dumps(item), now(), name, str(root)),
+            )
+            job_id = self.store.new_job(pid, event, "file_receive", file_id=fid)
+            receipt = (
+                f"已收到《{name}》，正在排队；前一项 {ahead[0]['id']} 完成后保存。"
+                if ahead and ahead[0]["state"] in ("queued", "claimed")
+                else (
+                    f"已收到《{name}》；队列因 {ahead[0]['id']} 待核对而暂停，文件已保留。"
+                    if ahead
+                    else f"已收到《{name}》。"
+                )
+            )
+            self.store.enqueue(
+                "file-received:" + fid,
+                prefix + " " + receipt,
+                event,
+                pid,
+                job_id=job_id,
+            )

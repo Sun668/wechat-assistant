@@ -51,12 +51,12 @@ class ProjectStore:
           project_id TEXT NOT NULL REFERENCES projects(id),thread_id TEXT UNIQUE,
           created_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS files(
-          id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),
+          id TEXT PRIMARY KEY,project_id TEXT REFERENCES projects(id),
           source_key TEXT UNIQUE,name TEXT NOT NULL,state TEXT NOT NULL,media TEXT,
           size INTEGER,sha256 TEXT,created_at TEXT NOT NULL,relative_path TEXT,storage_root TEXT);
         CREATE TABLE IF NOT EXISTS jobs(
           seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE,
-          project_id TEXT NOT NULL REFERENCES projects(id),task_id TEXT REFERENCES tasks(id),
+          project_id TEXT REFERENCES projects(id),task_id TEXT REFERENCES tasks(id),
           source_event TEXT NOT NULL,kind TEXT NOT NULL,body TEXT NOT NULL DEFAULT '',
           file_id TEXT REFERENCES files(id),state TEXT NOT NULL DEFAULT 'queued',
           claim_token TEXT,error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
@@ -97,6 +97,9 @@ class ProjectStore:
         ):
             if column not in {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+        from .schema import allow_unassigned_receipts
+
+        allow_unassigned_receipts(self)
         with self.transaction() as db:
             for project in self.projects():
                 if not project["folder"]:
@@ -273,6 +276,11 @@ class ProjectStore:
         return self.codex_project_dir(project_id)
 
     def receive_directory(self, project_id):
+        if project_id is None:
+            target = self.upload_config.receive_directory() if self.upload_config else None
+            if target is None:
+                raise ValueError("请先选择项目，或用 /upload-path 配置收件目录后再发送文件")
+            return target
         primary = self.codex_project_dir(project_id)
         return (self.upload_config.receive_directory() or primary) if self.upload_config else primary
 
@@ -285,11 +293,16 @@ class ProjectStore:
         return self.upload_config.set(value)
 
     def file_location_label(self, row):
+        if row["project_id"] is None:
+            return "接收目录"
         project = self.project(row["project_id"])
         return (
             "接收目录" if row.get("storage_root")
             and row["storage_root"] != project.get("source_path") else "项目目录"
         )
+
+    def file_prefix(self, row):
+        return "【收件箱】" if row["project_id"] is None else f"【{self.project(row['project_id'])['name']}】"
 
     def codex_project_dir(self, project_id):
         """Use the client's first (primary) folder for local Codex work."""
@@ -319,7 +332,7 @@ class ProjectStore:
         existing = {
             row["name"].casefold()
             for row in self.rows(
-                "SELECT id,name FROM files WHERE project_id=? OR storage_root=?",
+                "SELECT id,name FROM files WHERE project_id IS ? OR storage_root=?",
                 (project_id, str(folder)),
             )
             if row["id"] != exclude_id
@@ -351,6 +364,8 @@ class ProjectStore:
     def file_path(self, row):
         if row["name"] != safe_name(row["name"]):
             raise ValueError("文件名无效")
+        if row["project_id"] is None and not row.get("storage_root"):
+            raise ValueError("未归属项目的文件缺少固定接收目录")
         if row.get("storage_root"):
             if row.get("relative_path") != row["name"]:
                 raise ValueError("文件路径超出项目目录")
@@ -390,7 +405,7 @@ class ProjectStore:
             )
             self.enqueue(
                 "download:" + row["id"],
-                f"【{self.project(row['project_id'])['name']}】《{row['name']}》"
+                f"{self.file_prefix(row)}《{row['name']}》"
                 f"已保存到{self.file_location_label(row)}。\n{path}",
                 row["source_key"].rsplit(":", 1)[0],
                 row["project_id"],
@@ -453,6 +468,8 @@ class ProjectStore:
         return task_id
 
     def new_job(self, project_id, event, kind, body="", task_id=None, file_id=None):
+        if project_id is None and (kind != "file_receive" or not file_id or task_id):
+            raise ValueError("未选择项目时只允许文件接收，不允许模型工作单")
         cursor = self.db.execute(
             """INSERT INTO jobs
           (project_id,task_id,source_event,kind,body,file_id,created_at) VALUES(?,?,?,?,?,?,?)""",

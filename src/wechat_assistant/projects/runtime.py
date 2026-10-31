@@ -167,13 +167,13 @@ class ProjectRuntime:
             content = self.ilink.media.download(json.loads(file["media"]))
             self.store.save_file(file, content)
             body = (
-                f"【{self.store.project(file['project_id'])['name']}】《{file['name']}》"
+                f"{self.store.file_prefix(file)}《{file['name']}》"
                 f"已保存到{self.store.file_location_label(file)}。\n{self.store.file_path(file)}"
             )
         except Exception:
             with self.store.transaction() as db:
                 db.execute("UPDATE files SET state='failed' WHERE id=?", (file["id"],))
-            body = f"【{self.store.project(file['project_id'])['name']}】《{file['name']}》处理失败：下载未完成，队列已暂停；可发送“重试文件《{file['name']}》”。"
+            body = f"{self.store.file_prefix(file)}《{file['name']}》处理失败：下载未完成，队列已暂停；可发送“重试文件《{file['name']}》”。"
         with self.store.transaction():
             self.store.enqueue(
                 "download:" + file["id"],
